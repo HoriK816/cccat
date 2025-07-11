@@ -1,7 +1,7 @@
 # Makefile
 
-TARGET = cccat
-SRC = cccat.c
+TARGET = neko
+SRC = neko.c
 BIN_DIR = ../bin
 
 all: $(BIN_DIR)/$(TARGET)
