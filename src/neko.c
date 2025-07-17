@@ -5,10 +5,10 @@
 #include <ctype.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 
 #define BUFSIZE 4096
 #define MAX_LINE 4096
-#define TERMINAL_WIDTH 80
 #define LINE_DISPLAY_WIDTH 64
 
 int opt_number_all = 0;
@@ -17,6 +17,25 @@ int opt_show_ends = 0;
 int opt_show_tabs = 0;
 int opt_center_left = 0;
 int opt_use_color = 0;
+
+int get_terminal_width(void) {
+	int default_width = 80;
+
+	/* STDINの横幅を使う  */
+    struct winsize ws;
+	if (isatty(STDIN_FILENO)) {
+		if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) != -1)
+			return ws.ws_col;
+	}
+
+    /* STDERRの横幅を使う  */
+	if (isatty(STDERR_FILENO)) {
+		if (ioctl(STDERR_FILENO, TIOCGWINSZ, &ws) != -1)
+			return ws.ws_col;
+	}
+
+    return default_width;
+}
 
 void print_with_color(char c) {
     if (isdigit(c)) {
@@ -54,7 +73,8 @@ void print_line(const char *linebuf, int line_num) {
     expanded_line[idx] = '\0';
 
     // 全体のセンタリング（64列の出力を80列の中央に配置）
-    int margin = (TERMINAL_WIDTH - LINE_DISPLAY_WIDTH) / 2;
+    int terminal_width = get_terminal_width();
+    int margin = (terminal_width - LINE_DISPLAY_WIDTH) / 2;
     for (int i = 0; i < margin; i++) {
         dprintf(1, " ");
     }
