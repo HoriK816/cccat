@@ -1,23 +1,49 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <ctype.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 
 #define BUFSIZE 4096
 #define MAX_LINE 4096
-#define TERMINAL_WIDTH 80
 #define LINE_DISPLAY_WIDTH 64
 
-int opt_number_all = 0;
-int opt_number_nonblank = 0;
-int opt_show_ends = 0;
-int opt_show_tabs = 0;
-int opt_center_left = 0;
-int opt_use_color = 0;
+typedef struct {
+    int number_all;
+    int number_nonblank;
+    int show_ends;
+    int show_tabs;
+    int center_left;
+    int use_color;
+}opt_flag_t;
 
+opt_flag_t opt_flag = {0};
+
+/* STDINかSTDOUTを参照して端末の横幅を取得する関数  */
+int get_terminal_width(void) {
+	int default_width = 80;
+
+	// STDINの横幅を使う 
+    struct winsize ws;
+	if (isatty(STDIN_FILENO)) {
+		if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) != -1)
+			return ws.ws_col;
+	}
+
+    // STDERRの横幅を使う
+	if (isatty(STDERR_FILENO)) {
+		if (ioctl(STDERR_FILENO, TIOCGWINSZ, &ws) != -1)
+			return ws.ws_col;
+	}
+
+    return default_width;
+}
+
+/* 文字に色をつける関数  */
 void print_with_color(char c) {
     if (isdigit(c)) {
         dprintf(1, "\033[1;34m%c\033[0m", c);
@@ -28,6 +54,7 @@ void print_with_color(char c) {
     }
 }
 
+/* 一行分の文字列を出力する関数  */
 void print_line(const char *linebuf, int line_num) {
     int content_width = 0;
     int line_len = strlen(linebuf);
@@ -36,7 +63,7 @@ void print_line(const char *linebuf, int line_num) {
 
     // タブや^I，$などの展開処理
     for (int i = 0; i < line_len; i++) {
-        if (opt_show_tabs && linebuf[i] == '\t') {
+        if (opt_flag.show_tabs && linebuf[i] == '\t') {
             strcpy(&expanded_line[idx], "^I");
             idx += 2;
             content_width += 2;
@@ -46,7 +73,7 @@ void print_line(const char *linebuf, int line_num) {
         }
     }
 
-    if (opt_show_ends) {
+    if (opt_flag.show_ends) {
         expanded_line[idx++] = '$';
         content_width++;
     }
@@ -54,19 +81,22 @@ void print_line(const char *linebuf, int line_num) {
     expanded_line[idx] = '\0';
 
     // 全体のセンタリング（64列の出力を80列の中央に配置）
-    int margin = (TERMINAL_WIDTH - LINE_DISPLAY_WIDTH) / 2;
+    int terminal_width = get_terminal_width();
+    int margin = (terminal_width - LINE_DISPLAY_WIDTH) / 2;
     for (int i = 0; i < margin; i++) {
         dprintf(1, " ");
     }
 
     // 左揃えで行番号表示
-    if (opt_number_all || (opt_number_nonblank && linebuf[0] != '\n' && linebuf[0] != '\0')) {
+    if (opt_flag.number_all 
+            || (opt_flag.number_nonblank 
+                    && linebuf[0] != '\n' && linebuf[0] != '\0')) {
         dprintf(1, "%6d\t", line_num);
     }
 
     // 本文表示（色付きオプションあり）
     for (int i = 0; i < idx; i++) {
-        if (opt_use_color) {
+        if (opt_flag.use_color) {
             print_with_color(expanded_line[i]);
         } else {
             write(1, &expanded_line[i], 1);
@@ -76,6 +106,7 @@ void print_line(const char *linebuf, int line_num) {
     dprintf(1, "\n");
 }
 
+/* catの本体  */
 int enhanced_cat(int fd, const char *filename) {
     char buf[BUFSIZE];
     char linebuf[MAX_LINE];
@@ -92,7 +123,8 @@ int enhanced_cat(int fd, const char *filename) {
             if (c == '\n') {
                 linebuf[line_idx - 1] = '\0';  // 改行を除去
                 print_line(linebuf, line_num);
-                if (opt_number_all || (opt_number_nonblank && linebuf[0] != '\0')) {
+                if (opt_flag.number_all 
+                        || (opt_flag.number_nonblank && linebuf[0] != '\0')) {
                     line_num++;
                 }
                 line_idx = 0;
@@ -113,6 +145,7 @@ int enhanced_cat(int fd, const char *filename) {
     return 0;
 }
 
+/* 使い方を表示する関数 */
 void usage(const char *prog) {
     fprintf(stderr,
         "Usage: %s [options] [file...]\n"
@@ -128,27 +161,43 @@ void usage(const char *prog) {
 }
 
 int main(int argc, char *argv[]) {
+
+    // optionの読み込み
     int opt;
     while ((opt = getopt(argc, argv, "nbETcC")) != -1) {
         switch (opt) {
-            case 'n': opt_number_all = 1; break;
-            case 'b': opt_number_nonblank = 1; break;
-            case 'E': opt_show_ends = 1; break;
-            case 'T': opt_show_tabs = 1; break;
-            case 'c': opt_center_left = 1; break;
-            case 'C': opt_use_color = 1; break;
+            case 'n':
+                opt_flag.number_all = true;
+                break;
+            case 'b':
+                opt_flag.number_nonblank = true;
+                break;
+            case 'E':
+                opt_flag.show_ends = true;
+                break;
+            case 'T':
+                opt_flag.show_tabs = true;
+                break;
+            case 'c':
+                opt_flag.center_left = true;
+                break;
+            case 'C': 
+                opt_flag.use_color = true;
+                break;
             default:
                 usage(argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
 
-    if (opt_number_all && opt_number_nonblank) {
+    // NUMBER_ALL (-n) と NUBMER_NONBLANK (-b) は共存し得ないので中断
+    if (opt_flag.number_all && opt_flag.number_nonblank) {
         fprintf(stderr, "Error: -n and -b are mutually exclusive\n");
         exit(EXIT_FAILURE);
     }
 
     if (optind == argc) {
+
         // 標準入力
         enhanced_cat(STDIN_FILENO, "stdin");
     } else {
